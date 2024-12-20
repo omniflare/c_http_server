@@ -10,7 +10,13 @@
 // global and macros
 #define LISTEN_ADDR "127.0.0.1"
 char *error;
+// structs
+struct HttpRequest {
+  char method[8];
+  char url[128];
+};
 
+typedef struct HttpRequest http_req;
 // returns 0 if the socket gets error else returns *fd type of result
 int srv_init(int port) {
   int s;
@@ -52,13 +58,73 @@ int client_accept(int s) {
   return c;
 }
 
-// returns 0 on error, or return 
-void client_handle_conn(int s, int c){
-    return ;
+// returns 0 on error, or return
+void client_handle_conn(int s, int c) { return; }
+
+// returns 0 on error or returns of type http_req struct
+http_req *parse_http(char *str) {
+  http_req *req;
+  char *method_end, *url_start, *url_end;
+
+  req = malloc(sizeof(http_req));
+  if (!req) {
+    error = "parse_http() memory allocation error";
+    return NULL;
+  }
+
+  method_end = strchr(str, ' ');
+  if (!method_end) {
+    error = "parse_http() NO SPACE FOUND after method";
+    free(req);
+    return NULL;
+  }
+
+  // Copy the method into req->method
+  size_t method_length = method_end - str;
+  if (method_length >= sizeof(req->method)) {
+    error = "parse_http() method too long";
+    free(req);
+    return NULL;
+  }
+  strncpy(req->method, str, method_length);
+  req->method[method_length] = '\0'; // Null-terminate the method string
+
+  // Find the start of the URL (skip the space after the method)
+  url_start = method_end + 1;
+
+  // Find the end of the URL (space after URL)
+  url_end = strchr(url_start, ' ');
+  if (!url_end) {
+    error = "parse_http() NO SPACE FOUND after URL";
+    free(req);
+    return NULL;
+  }
+
+  // Copy the URL into req->url
+  size_t url_length = url_end - url_start;
+  if (url_length >= sizeof(req->url)) {
+    error = "parse_http() URL too long";
+    free(req);
+    return NULL;
+  }
+  strncpy(req->url, url_start, url_length);
+  req->url[url_length] = '\0'; // Null-terminate the URL string
+
+  return req;
 }
+
 int main(int argc, char *argv[]) {
   int s, c;
   char *port;
+  http_req *req;
+
+  char *template;
+  template = "GET /something HTTP/1.1";
+
+  req = parse_http(template);
+
+  printf("Method : %s \nURL : %s\n", req->method, req->url);
+  free(req);
 
   if (argc < 2) {
     fprintf(stderr, "Usage is %s <listening_port> ", argv[0]);
