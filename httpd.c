@@ -130,6 +130,19 @@ char *read_from_client(int c) {
   }
 }
 
+char* get_content_type(const char* filepath) {
+    char* ext = strrchr(filepath, '.');
+    if (ext) {
+        if (!strcmp(ext, ".png")) return "image/png";
+        if (!strcmp(ext, ".jpg") || !strcmp(ext, ".jpeg")) return "image/jpeg";
+        if (!strcmp(ext, ".gif")) return "image/gif";
+        if (!strcmp(ext, ".html") || !strcmp(ext, ".htm")) return "text/html";
+        if (!strcmp(ext, ".css")) return "text/css";
+        if (!strcmp(ext, ".js")) return "application/javascript";
+    }
+    return "application/octet-stream";
+}
+
 void http_headers(int c, int code) {
   char buf[512];
   const char *status_text = (code == 200) ? "OK" : "Not Found";
@@ -251,77 +264,81 @@ int sendfile(int c, char *contenttype, File *file) {
 
 // returns 0 on error, or return
 void client_handle_conn(int s, int c) {
-  http_req *req;
-  char *p;
-  char *res;
-  char filepath[256]; // Increased buffer size for safety
-  File *f;
+    http_req *req;
+    char *p;
+    char *res;
+    char filepath[256];
+    File *f;
 
-  p = read_from_client(c);
-  if (!p) {
-    fprintf(stderr, "error while reading client %s\n", error);
-    close(c);
-    return;
-  }
-
-  req = parse_http(p);
-  if (!req) {
-    fprintf(stderr, "error while parsing http %s\n", error);
-    close(c);
-    return;
-  }
-
-  printf("method : %s and route %s\n ", req->method, req->url);
-
-  // Handle image requests
-  if (!strcmp(req->method, "GET") && !strncmp(req->url, "/img/", 5)) {
-    // Construct the file path - assuming images are in a subdirectory called
-    // "img"
-    memset(filepath, 0, sizeof(filepath));
-    snprintf(filepath, sizeof(filepath) - 1, ".%s", req->url);
-
-    f = read_file(filepath);
-    if (!f) {
-      res = "File not found";
-      http_headers(c, 404);
-      http_response(c, "text/plain", res);
-    } else {
-      http_headers(c, 200);
-      // Determine content type based on file extension
-      char *ext = strrchr(filepath, '.');
-      char *content_type = "application/octet-stream"; // default
-      if (ext) {
-        if (!strcmp(ext, ".png"))
-          content_type = "image/png";
-        else if (!strcmp(ext, ".jpg") || !strcmp(ext, ".jpeg"))
-          content_type = "image/jpeg";
-        else if (!strcmp(ext, ".gif"))
-          content_type = "image/gif";
-      }
-
-      if (!sendfile(c, content_type, f)) {
-        res = "HTTP Server Error";
-        http_response(c, "text/plain", res);
-      }
-      free(f->file_content);
-      free(f);
+    p = read_from_client(c);
+    if (!p) {
+        fprintf(stderr, "error while reading client %s\n", error);
+        close(c);
+        return;
     }
-  }
-  // Handle web page request
-  else if (!strcmp(req->method, "GET") && !strcmp(req->url, "/app/web")) {
-    res = "<html><img src='/img/cat.png' alt='super cat' /></html>";
-    http_headers(c, 200);
-    http_response(c, "text/html", res);
-  }
-  // Handle all other requests
-  else {
-    res = "File not found";
-    http_headers(c, 404);
-    http_response(c, "text/plain", res);
-  }
 
-  free(req);
-  close(c);
+    req = parse_http(p);
+    if (!req) {
+        fprintf(stderr, "error while parsing http %s\n", error);
+        close(c);
+        return;
+    }
+
+    printf("method : %s and route %s\n ", req->method, req->url);
+
+    if (!strcmp(req->method, "GET")) {
+        // Handle static files (both images and HTML)
+        if (!strncmp(req->url, "/img/", 5) || !strncmp(req->url, "/app/", 5)) {
+            memset(filepath, 0, sizeof(filepath));
+            snprintf(filepath, sizeof(filepath) - 1, ".%s", req->url);
+
+            f = read_file(filepath);
+            if (!f) {
+                res = "File not found";
+                http_headers(c, 404);
+                http_response(c, "text/plain", res);
+            } else {
+                http_headers(c, 200);
+                char* content_type = get_content_type(filepath);
+
+                if (!sendfile(c, content_type, f)) {
+                    res = "HTTP Server Error";
+                    http_response(c, "text/plain", res);
+                }
+                free(f->file_content);
+                free(f);
+            }
+        }
+        // Handle root or index request
+        else if (!strcmp(req->url, "/") || !strcmp(req->url, "/index.html")) {
+            memset(filepath, 0, sizeof(filepath));
+            snprintf(filepath, sizeof(filepath) - 1, "./app/index.html");
+
+            f = read_file(filepath);
+            if (!f) {
+                res = "Welcome to the server. Please specify a valid path.";
+                http_headers(c, 200);
+                http_response(c, "text/html", res);
+            } else {
+                http_headers(c, 200);
+                if (!sendfile(c, "text/html", f)) {
+                    res = "HTTP Server Error";
+                    http_response(c, "text/plain", res);
+                }
+                free(f->file_content);
+                free(f);
+            }
+        }
+        // Handle 404 for all other routes
+        else {
+            res = "File not found";
+            http_headers(c, 404);
+            http_response(c, "text/plain", res);
+        }
+    }
+
+    free(req);
+    close(c);
 }
 
 int main(int argc, char *argv[]) {
